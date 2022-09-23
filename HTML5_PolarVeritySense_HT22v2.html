@@ -128,11 +128,11 @@ function filterGyro(xGyroNew, yGyroNew, zGyroNew){
 
     //1B.3:
     let comRoll = rollAlpha*(comRoll+dt*yGyroNew)(1-rollAlpha)*accRoll;
+    plotOnGreenLine(comRoll)
     //console.log("comRoll is: "+comRoll)
 
 
     
-
 
 }
 
@@ -199,15 +199,10 @@ let alfaCadence = 0.2
 
     if(AFirst > ASecond && OldAFirst <OldASecond && Math.abs(ADiff) >treshold){
         seq = NumberOfSamples*dT
-        //console.log(seq + "seconds since last hit")
         cadence = alfaCadence*cadence+(1-alfaCadence)*1/seq //EWMA filtered cadence
-       // plotOnGreenLine(100) //to see found hits displayed in graph 
         NumberOfSamples = 0;
-        oldTimestamp = performance.now()
     }   
-   /* else {
-        plotOnGreenLine(0)
-    }*/
+   
 
 
 
