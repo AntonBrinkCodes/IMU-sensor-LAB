@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>HTML5 Sensor Fusion </title>
+<style type="text/css">
+    canvas { 
+      border:1px solid black;
+    }
+</style>
+
+
+</head>
+<body onload="init();">
+
+    <canvas id="AccCanvas" width="500" height="200"></canvas>
+    <canvas id="GyroCanvas" width="500" height="200"></canvas>
+    <canvas id="SensorFusion" width="500" height="200"></canvas>
+    <p>
+        <button onclick="start()">Start sensor</button>
+        <button onclick="stop()">Stop sensor</button>
+        <button onclick="saveToFile()">Save to file</button>
+    </p>
+
+
+<script> 
+ var canvas, canvas2, canvas3, ctx, ctx2, ctx3, requestId;
+ var xAcc = [];
+ var yAcc = [];
+ var zAcc = [];
+ var xGyro = [];
+ var yGyro = [];
+ var zGyro = [];
+ var rollAr = [];
+ var pitchAr = [];
+ var yawAr = [];
+ // Bluetooth variables
+ let targetDevice = null;
+
+ const AccGyro_SERVICE = "fb005c80-02e7-f387-1cad-8acd2d8df0c8";
+ const AccGyro_PERDIO = "fb005c81-02e7-f387-1cad-8acd2d8df0c8";
+ const AccGyro_DATA = "fb005c82-02e7-f387-1cad-8acd2d8df0c8";
+
+
+ // variables for 1A
+ var A = 0;
+ var AOld = 0;
+ var AFirst = 0;
+ var ASecond = 0;
+ 
+ // Variabels for measuring the cadence
+ var cadence = 0;
+ var seq = 0;
+ var NumberOfSamples = 0;
+ var oldASecond = 0;
+ var oldAFirst = 0;
+ var timestamp  = performance.now()
+ var oldTimestamp = timestamp;
+ var OutputString = "Output";
+ var treshold = 0.2;
+
+
+ //Variables for ID assignment: Find if polar sense as shaken continually for >1 second.
+ var timer = 0;
+ var timeInShake = 0;
+ var shakeTreshold = 0.5; //How sensitive for detecting if device is being shaken. Higher number = Less sensitive.
+ var shaking = false;
+ 
+
+ // Variables for 2A
+ var xGyroOld = 0;
+ var yGyroOld = 0;
+ var zGyroOld = 0;
+ var xAccOld = 100;
+ var yAccOld = 100;
+ var zAccOld = 100;
+ 
+ // Variables for 1B
+ var roll = 0;
+ var comRoll = 0;
+ var rollAlpha = 0.3;
+ var accRoll = 0;
+
+
+
+ function onDataChanged(event) {
+
+    // RSSI Recived Signal Strength Indicator
+    let RSSI = event.rssi; 
+
+    // Event data is converted into 6 parameters. X, Y, Z of the Accelerometer and Gyro
+    let value = event.target.value
+
+    let measId = value.getUint8(0);
+
+    // console.log('The ID:'+measId);
+    //console.log('byteLength:'+value.byteLength);
+    
+    value = value.buffer ? value : new DataView(value); // In Chrome 50+, a DataView is returned instead of an ArrayBuffer.
+
+    var uint8View = new Uint8Array(value.buffer);
+    // console.log("incoming data: ", uint8View);
+
+    // HEADING [streamType x 8 bit, timestamp x 64 bits, frameType x 8 bits, refSample x (numOfChannels * 16 bits), ...]
+    // DELTA DUMP 1 [..., deltaSize x 8 bits, deltaSampleCount x 8 bits, samples x (deltaSize * numOfChannels * deltaSampleCount), ...]
+    // DELTA DUMP 2 [..., deltaSize x 8 bits, deltaSampleCount x 8 bits, samples x (deltaSize * numOfChannels * deltaSampleCount), ...]
+
+    let offset = 10 + 2 * 3; 
+    let deltaSize = value.getUint8(offset);
+    let sampleCount = value.getUint8(offset + 1);
+    let deltaBytesCount = Math.ceil((sampleCount * deltaSize) * 3 / 8);
+    //console.log(`>> ID: ${measId} deltaSize: ${deltaSize} bits/value | sampleCount: ${sampleCount} samples`);
+
+    if(measId == 2){
+        updateAcc(value);
+    }else if(measId == 5){
+        updateGyro(value);
+    }
+}
+
+function filterGyro(xGyroNew, yGyroNew, zGyroNew){
+    // The samling time is set under the function findPeriodCharacteristic to 52Hz
+    let dT = 1/52
+
+    // 1B.2 Calculat the pitch on the movesens from the Gyro and display the result
+    let oldRoll = roll
+    roll = oldRoll + dT*yGyroNew
+    console.log("gyroRoll is: "+roll)
+
+    //1B.3:
+    let comRoll = rollAlpha*(comRoll+dt*yGyroNew)(1-rollAlpha)*accRoll;
+    console.log("comRoll is: "+comRoll)
+
+
+    
+
+
+}
+
+function filter(xAccNew, yAccNew, zAccNew){
+
+// The samling time is set under the function findPeriodCharacteristic to 52Hz
+let dT = 1/52
+
+// Start writing your code below this line 
+let xGyroNew = 0
+let g = 9.82
+let alfaCadence = 0.2
+
+// Tips: To print on the console use console.log() 
+// console.log('xAcc '+xAccNew+'xGyro '+xGyroNew);
+
+
+// 1A.1 - Calculate the combinde Acceleration 
+    
+    // The function to use is Math.sqrt() and Math.pow(g, 2) 
+    let AOld = A
+    A = Math.sqrt(Math.pow(xAccNew, 2) + Math.pow(yAccNew, 2) + Math.pow(zAccNew, 2)) -g
+
+    
+    // To plot a graph u can use the function bellow.    
+    // plotOnRedLine(XAccOld);
+    // plotOnGreenLine(XAccNew);
+    // plotOnBlueLine([varible]);
+    // The value of the variable should be inbetween -100 and 100 
+     
+    
+
+
+// 1A.2  - EWMA Exponential Weighted Moving Average
+    
+    let alfa = 0.6; // try diffrent alfa values and observer the result
+    OldAFirst = AFirst
+    AFirst = alfa*AFirst+(1-alfa)*A
+
+    plotOnRedLine(AFirst*4)
+    
+// 1A.3 - Add an additional EWMA filter with both an alfa and beta value
+
+    alfa = 0.7
+    let beta = 0.99
+    OldASecond = ASecond
+    if(A>AOld){
+        ASecond = alfa*ASecond + (1-alfa)*A //takes "ordinary" amount of new value if it's bigger than previous.
+    }
+    if(A<AOld){
+        ASecond = beta*ASecond + (1-beta)*A //Takes very little amount of new value if it's smaller than previous.
+    }
+    plotOnBlueLine(ASecond*4)
+
+   
+
+// 1A.4 Calculate the cadence frequency
+
+    // There is a variable cadence that you can use to make a EWMA filter of the cadence
+    
+    timer = timer+1;
+    NumberOfSamples = NumberOfSamples + 1;
+    let ADiff = AFirst - ASecond;
+
+    if(AFirst > ASecond && OldAFirst <OldASecond && Math.abs(ADiff) >treshold){
+        seq = NumberOfSamples*dT
+        //console.log(seq + "seconds since last hit")
+        cadence = alfaCadence*cadence+(1-alfaCadence)*1/seq //EWMA filtered cadence
+       // plotOnGreenLine(100) //to see found hits displayed in graph 
+        NumberOfSamples = 0;
+        oldTimestamp = performance.now()
+    }   
+   /* else {
+        plotOnGreenLine(0)
+    }*/
+
+
+
+   if(NumberOfSamples >(1/cadence)/dT+1/dT){ //if device hasnt detected a hit in 1s more than current frequency the cadence will decay.
+        cadence = cadence*0.5
+        shaking = false
+        timeInShake = 0
+    }
+
+    
+// In depth: Find if Polar Sense has been shaking for >1 second
+//console.log(A)
+    let AShakeDiff = AFirst-OldAFirst;
+
+    if(Math.abs(AShakeDiff)>shakeTreshold && shaking == false){
+        timeInShake = timeInShake +1
+        if(timeInShake >=1/dT){
+            if(NumberOfSamples<1/dT){
+                console.log("Device has been shaking for 1 sec")
+                shaking = true
+            }
+        }
+        
+    }
+
+    if(timer == 1/dT){
+        timer = 0
+        if(cadence>dT){
+            console.log(cadence + "s cadence.")
+        }
+        else{
+            console.log("0s cadence.")
+        }
+    }
+// 1B.1 Calculat the roll on the movesens from the Accelerometer and display the result
+    let denom = Math.sqrt(Math.pow(yAccNew, 2) + Math.pow(zAccNew,2));
+    accRoll  = 180*Math.atan2(xAccNew, denom)/Math.PI;
+    console.log("accRoll is : "+accRoll)
+    
+
+
+// 1B.3 Apply a Complimenter filter that fuses the Acceleromter and Gyro data, display and compare the result.
+//See gyroFilter()
+    
+
+  
+}
+
+function uppdateAcc(xAccNew, yAccNew, zAccNew){
+xAcc.shift();
+xAcc.push(100+(xAccNew*8));
+yAcc.shift();
+yAcc.push(100+(yAccNew*8));
+zAcc.shift();
+zAcc.push(100+(zAccNew*8));
+filter(xAccNew, yAccNew, zAccNew)
+}
+
+function uppdateGyro(xGyroNew, yGyroNew, zGyroNew){
+xGyro.shift(); 
+xGyro.push(100+(xGyroNew));
+yGyro.shift();
+yGyro.push(100+(yGyroNew));
+zGyro.shift();
+zGyro.push(100+(zGyroNew));
+}
+
+
+
+
+function updateGyro(value){
+    let xGyroNew = value.getInt16(10 + 2 * 0, true);
+    let yGyroNew = value.getInt16(10 + 2 * 1, true);
+    let zGyroNew = value.getInt16(10 + 2 * 2, true);
+
+    //console.log(`x: ${xGyroNew} y: ${yGyroNew} z: ${zGyroNew*0.24399999}`);
+    
+    uppdateGyro(xGyroNew/100, yGyroNew/100, zGyroNew/100);
+    filterGyro(xGyroNew, yGyroNew, zGyroNew)
+
+    let offset = 10 + 2 * 3; 
+    let sampleCount = value.getUint8(offset + 1);
+    let indexDeltaStart = offset + 2;
+    let deltaSize = value.getUint8(offset);
+    let deltaBytesCount = Math.ceil((sampleCount * deltaSize) * 3 / 8);
+    let indexDeltaStop = indexDeltaStart + deltaBytesCount;
+
+    let deltaData = value.buffer.slice(indexDeltaStart, indexDeltaStop); // get the current delta dump
+    let binDeltaData = bufferToReverseBinString(deltaData);
+
+    for (let i = 0; i < sampleCount; i++) {
+        let j = 0;
+        let binSample = binDeltaData.slice(i * 3 * deltaSize);
+        let channelSample = binSample.slice(j * deltaSize, (j + 1) * deltaSize).split("").reverse().join("");
+        let signedInt = bitStringToSignedInt(channelSample);
+        xGyroNew = xGyroNew + (signedInt );
+        j = 1
+        binSample = binDeltaData.slice(i * 3 * deltaSize);
+        channelSample = binSample.slice(j * deltaSize, (j + 1) * deltaSize).split("").reverse().join("");
+        signedInt = bitStringToSignedInt(channelSample);
+        yGyroNew = yGyroNew + (signedInt );
+        j = 2
+        binSample = binDeltaData.slice(i * 3 * deltaSize);
+        channelSample = binSample.slice(j * deltaSize, (j + 1) * deltaSize).split("").reverse().join("");
+        signedInt = bitStringToSignedInt(channelSample);
+        zGyroNew = zGyroNew + (signedInt );
+        uppdateGyro(xGyroNew/100, yGyroNew/100, zGyroNew/100);
+        filterGyro(xGyroNew, yGyroNew, zGyroNew)
+        //console.log(`x: ${xGyroNew} y: ${yGyroNew} z: ${zGyroNew}`);
+    }
+
+}
+
+
+function updateAcc(value){
+    let xAccNew = value.getInt16(10 + 2 * 0, true)* 0.24399999 * 0.00980665;
+    let yAccNew = value.getInt16(10 + 2 * 1, true)* 0.24399999 * 0.00980665;
+    let zAccNew = value.getInt16(10 + 2 * 2, true)* 0.24399999 * 0.00980665;
+
+    uppdateAcc(xAccNew, yAccNew, zAccNew);
+
+    let offset = 10 + 2 * 3; 
+    let sampleCount = value.getUint8(offset + 1);
+    let indexDeltaStart = offset + 2;
+    let deltaSize = value.getUint8(offset);
+    let deltaBytesCount = Math.ceil((sampleCount * deltaSize) * 3 / 8);
+
+    let indexDeltaStop = indexDeltaStart + deltaBytesCount;
+    let deltaData = value.buffer.slice(indexDeltaStart, indexDeltaStop); // get the current delta dump
+    let test = value.buffer.slice(indexDeltaStart, Math.ceil(indexDeltaStart + deltaSize/8));
+    let binDeltaData = bufferToReverseBinString(deltaData);
+    var uint8View = new Uint8Array(test);
+    if(deltaSize == 12){
+        uint8View[1] = uint8View[1]^15;
+    }
+    if(deltaSize == 6){
+        uint8View[0] = uint8View[0]^63;
+    }
+   
+    //console.log("incoming data: ", uint8View);
+    
+
+
+    for (let i = 0; i < sampleCount; i++) {
+        let j = 0;
+        let binSample = binDeltaData.slice(i * 3 * deltaSize);
+        let channelSample = binSample.slice(j * deltaSize, (j + 1) * deltaSize).split("").reverse().join("");
+        let signedInt = bitStringToSignedInt(channelSample);
+        xAccNew = xAccNew + (signedInt * 0.24399999 * 0.01);
+        j = 1
+        binSample = binDeltaData.slice(i * 3 * deltaSize);
+        channelSample = binSample.slice(j * deltaSize, (j + 1) * deltaSize).split("").reverse().join("");
+        signedInt = bitStringToSignedInt(channelSample);
+        yAccNew = yAccNew + (signedInt * 0.24399999 * 0.01);
+        j = 2
+        binSample = binDeltaData.slice(i * 3 * deltaSize);
+        channelSample = binSample.slice(j * deltaSize, (j + 1) * deltaSize).split("").reverse().join("");
+        signedInt = bitStringToSignedInt(channelSample);
+        zAccNew = zAccNew + (signedInt * 0.24399999 * 0.01);
+        uppdateAcc(xAccNew, yAccNew, zAccNew);
+    }
+
+}
+
+
+
+
+
+ function init(){
+    canvas = document.getElementById('AccCanvas');
+    ctx = canvas.getContext('2d');
+    canvas2 = document.getElementById('GyroCanvas');
+    ctx2 = canvas2.getContext('2d');
+    canvas3 = document.getElementById('SensorFusion');
+    ctx3 = canvas3.getContext('2d');
+    for(i=0; i < 250; i++){
+        xAcc.push(100);
+        yAcc.push(100);
+        zAcc.push(100);
+        xGyro.push(100);
+        yGyro.push(100);
+        zGyro.push(100);
+        rollAr.push(100);
+        pitchAr.push(100);
+        yawAr.push(100);
+    }
+    console.log("init");
+ } 
+
+ function startBluetooth(){
+    navigator.bluetooth.requestDevice({
+    filters: [{ services: [AccGyro_SERVICE] }, {namePrefix: "Polar Sense" }]
+    })
+    .then(device => {
+        targetDevice = device;
+        return device.gatt.connect();
+    })
+    .then(server => {
+        return server.getPrimaryService(AccGyro_SERVICE);
+    })
+    .then(service => {
+        findDataCharacteristic(service);
+        findPeriodCharacteristic(service);
+    })
+    .catch(error => {
+      console.log(error);
+      targetDevice = null;
+    });
+ }
+
+
+ function findDataCharacteristic(service) {
+  service.getCharacteristic(AccGyro_DATA)
+    .then(characteristic => {
+      return characteristic.startNotifications();
+    })
+    .then(characteristic => {
+      characteristic.addEventListener('characteristicvaluechanged', onDataChanged);
+      console.log("change ");
+    })
+    .catch(error => {
+      console.log(error);
+    });
+ }
+
+ function plotOnRedLine(newValue){
+    rollAr.shift();
+      rollAr.push(100+newValue); 
+ }
+
+ function plotOnBlueLine(newValue){
+  yawAr.shift();
+    yawAr.push(100+newValue);
+ }
+
+ function plotOnGreenLine(newValue){
+  pitchAr.shift();
+    pitchAr.push(100+newValue);    
+ }
+
+ function findPeriodCharacteristic(service) {
+    console.log("setData");
+    service.getCharacteristic(AccGyro_PERDIO)
+    .then(characteristic => {
+        
+        //   const valAcc = new Uint8Array([2, 2, 0, 1, 52, 0, 1, 1, 16, 0, 2, 1, 8, 0, 4, 1, 3]);
+        const valAcc = new Uint8Array([2, 2, 0, 1, 52, 0, 1, 1, 16, 0, 2, 1, 8, 0, 4, 1, 3]);
+        characteristic.writeValueWithResponse(valAcc);
+        
+        setTimeout(function () {
+            const valGyro = new Uint8Array([2, 5, 0, 1, 52, 0, 1, 1, 16, 0, 2, 1, 208, 7, 4, 1, 3]);
+            characteristic.writeValueWithResponse(valGyro);                
+        }, 100);  
+
+        
+    })
+    .catch(error => {
+      console.log(error);
+    });
+ }
+   
+ function start() {
+   // Start the animation loop, targets 60 frames/s
+   startBluetooth();
+   requestId = requestAnimationFrame(animationLoop);
+ }
+
+ function stop() {
+   if (requestId) {
+      cancelAnimationFrame(requestId);
+   }
+   if (targetDevice == null) {
+    console.log('The target device is null.');
+    return;
+  }
+  //bluetoothCharacteristic.stopNotifications()
+  targetDevice.gatt.disconnect();
+ }
+
+
+
+
+ function animationLoop(timestamp){
+     //console.log("animate");
+     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+     ctx.font = "12px Arial";
+     ctx.fillStyle = "#FF0000";
+     ctx.fillText("Accelerometer X Y Z:",5,12);
+
+     ctx.strokeStyle = "#FF0000";
+     ctx.beginPath(0,200-xAcc[0]);
+     for(foo = 0; foo < canvas.width; foo++){
+         ctx.lineTo(foo*2,200-xAcc[foo]);
+     }
+     ctx.stroke();
+     
+     ctx.strokeStyle = "#00FF00";
+     ctx.beginPath(0,200-yAcc[0]);
+     for(foo = 0; foo < canvas.width; foo++){
+         ctx.lineTo(foo*2,200-yAcc[foo]);
+     }
+     ctx.stroke();
+
+     ctx.strokeStyle = "#0000FF";
+     ctx.beginPath(0,200-zAcc[0]);
+     for(foo = 0; foo < canvas.width; foo++){
+         ctx.lineTo(foo*2,200-zAcc[foo]);
+     }
+     ctx.stroke();
+     
+
+     ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
+
+     ctx2.font = "12px Arial";
+     ctx2.fillStyle = "#FF0000";
+     ctx2.fillText('Gyro X Y Z: ',5,12);
+
+     ctx2.strokeStyle = "#FF0000";
+     ctx2.beginPath(0,200-xGyro[0]);
+     for(foo = 0; foo < canvas2.width; foo++){
+         ctx2.lineTo(foo*2,200-xGyro[foo]);
+     }
+     ctx2.stroke();
+     
+     ctx2.strokeStyle = "#00FF00";
+     ctx2.beginPath(0,200-yGyro[0]);
+     for(foo = 0; foo < canvas2.width; foo++){
+         ctx2.lineTo(foo*2,200-yGyro[foo]);
+     }
+     ctx2.stroke();
+
+     ctx2.strokeStyle = "#0000FF";
+     ctx2.beginPath(0,200-zGyro[0]);
+     for(foo = 0; foo < canvas2.width; foo++){
+         ctx2.lineTo(foo*2,200-zGyro[foo]);
+     }
+     ctx2.stroke();
+
+     ctx3.clearRect(0, 0, canvas3.width, canvas3.height);
+
+     ctx3.font = "12px Arial";
+     ctx3.fillStyle = "#FF0000";
+     ctx3.fillText(OutputString,5,12);
+
+     ctx3.strokeStyle = "#FF0000";
+     ctx3.beginPath(0,200-rollAr[0]);
+     for(foo = 0; foo < canvas3.width; foo++){
+         ctx3.lineTo(foo*2,200-rollAr[foo]);
+     }
+     ctx3.stroke();
+     
+     ctx3.strokeStyle = "#00FF00";
+     ctx3.beginPath(0,200-pitchAr[0]);
+     for(foo = 0; foo < canvas3.width; foo++){
+         ctx3.lineTo(foo*2,200-pitchAr[foo]);
+     }
+     ctx3.stroke();
+
+     ctx3.strokeStyle = "#0000FF";
+     ctx3.beginPath(0,200-yawAr[0]);
+     for(foo = 0; foo < canvas3.width; foo++){
+         ctx3.lineTo(foo*2,200-yawAr[foo]);
+     }
+     ctx3.stroke();
+    
+    /*
+    if(xAcc.length > 250){
+        xAcc.shift();
+        yAcc.shift();
+        zAcc.shift();
+    }
+
+    if(xGyro.length > 250){
+        xGyro.shift();
+        yGyro.shift();
+        zGyro.shift();
+    }
+    */
+     
+    requestId = requestAnimationFrame(animationLoop);
+ }
+
+// convert buffer array to binary
+function bufferToReverseBinString(buffer) {
+    array = new Uint8Array(buffer);
+    let bin = [];
+    array.forEach(function (element) {
+        let elementBin = (element >>> 0).toString(2);
+        let elementBin8 = elementBin.padStart(8, '0');
+        bin.push(elementBin8.split('').reverse().join(''));
+    });
+    return bin.join('');
+}
+
+function bitStringToSignedInt(binStr) {
+    if (binStr.length >64) throw new RangeError('parsing only supports ints up to 32 bits');
+    return parseInt(binStr[0] === "1" ? binStr.padStart(32, "1") : binStr.padStart(32, "0"), 2) >> 0;
+}
+
+
+ function saveToFile(){
+    var file;
+    var properties = {type: 'application/json'}; // Specify the file's mime-type.
+    var myObj = {accX: xAcc, accY: yAcc, accZ: zAcc, magX: xGyro, magY: yGyro, magZ: xGyro};
+    var myJSON = JSON.stringify(myObj);
+    try {
+        // Specify the filename using the File constructor, but ...
+        file = new File(myJSON, "6DOF.json", properties);
+    } catch (e) {
+        // ... fall back to the Blob constructor if that isn't supported.
+        file = new Blob([myJSON], {type: "application/json"});
+    }
+    var a = document.createElement('a');
+    a.href = window.URL.createObjectURL(file);
+    a.download = "6DOF.json";
+    a.click();
+ }
+
+</script>
+</body>
+</html>
