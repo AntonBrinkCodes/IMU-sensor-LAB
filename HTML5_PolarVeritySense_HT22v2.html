@@ -124,11 +124,11 @@ function filterGyro(xGyroNew, yGyroNew, zGyroNew){
     // 1B.2 Calculat the pitch on the movesens from the Gyro and display the result
     let oldRoll = roll
     roll = oldRoll + dT*yGyroNew
-    console.log("gyroRoll is: "+roll)
+    //console.log("gyroRoll is: "+roll)
 
     //1B.3:
     let comRoll = rollAlpha*(comRoll+dt*yGyroNew)(1-rollAlpha)*accRoll;
-    console.log("comRoll is: "+comRoll)
+    //console.log("comRoll is: "+comRoll)
 
 
     
@@ -245,7 +245,7 @@ let alfaCadence = 0.2
 // 1B.1 Calculat the roll on the movesens from the Accelerometer and display the result
     let denom = Math.sqrt(Math.pow(yAccNew, 2) + Math.pow(zAccNew,2));
     accRoll  = 180*Math.atan2(xAccNew, denom)/Math.PI;
-    console.log("accRoll is : "+accRoll)
+    //console.log("accRoll is : "+accRoll)
     
 
 
